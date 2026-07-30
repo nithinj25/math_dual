@@ -1,60 +1,91 @@
 import { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
+import { DuelRoom, Player } from "./duelRoom.js";
 
-const HEARTBEAT_INTERVAL_MS = 30_000;
-
-// Our own per-connection state. `ws` doesn't give us this, so we attach it.
-interface Client {
-  id: string;
-  socket: WebSocket;
-  isAlive: boolean;
-}
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 export function startWsServer(port: number): WebSocketServer {
   const wss = new WebSocketServer({ port });
-  const clients = new Map<WebSocket, Client>();
+
+  const players = new Map<WebSocket, Player>();
+  const rooms = new Map<WebSocket, DuelRoom>();
+  let waiting: Player | null = null;
 
   wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
-    const client: Client = { id: randomUUID(), socket, isAlive: true };
-    clients.set(socket, client);
-    console.log(`[open]  ${client.id}  (${clients.size} connected)  from ${req.socket.remoteAddress}`);
+    console.log(`[open]  (${players.size + 1} connected) from ${req.socket.remoteAddress}`);
 
-    // pong is the client's reply to our ping — proof the socket is still alive.
     socket.on("pong", () => {
-      client.isAlive = true;
+      const p = players.get(socket);
+      const room = rooms.get(socket);
+      if (p && room) room.onPong(p).catch(console.error);
     });
 
-    socket.on("message", (data: Buffer, isBinary: boolean) => {
-      console.log(`[msg]   ${client.id}  ${data.toString()}`);
-      socket.send(data, { binary: isBinary }); // echo
+    socket.on("message", async (data: Buffer) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return socket.send(JSON.stringify({ t: "rejected", reason: "not JSON"}));
+      }
+
+      if(msg.t === "join"){
+        if(players.has(socket)) return;
+        const player: Player = {
+          id: msg.name ?? `p_${randomUUID().slice(0, 6)}`,
+          socket, rttMs: 0, lastPingAt: Date.now(),
+        };
+
+        players.set(socket, player);
+        console.log(`[join] ${player.id}`);
+
+        if(waiting === null){
+          waiting = player;
+          socket.send(JSON.stringify({ t: "waiting"}));
+        }
+        else{
+          const pair = [waiting, player];
+          waiting = null;
+          const room = new DuelRoom(`m_${randomUUID().slice(0, 6)}`, pair);
+          for (const p of pair) rooms.set(p.socket, room);
+          console.log(`[match] ${pair[0].id} vs ${pair[1].id}`);
+          room.start().catch(console.error);
+        }
+        return;
+      }
+      if(msg.t === "answer"){
+        const p = players.get(socket);
+        const room  = rooms.get(socket);
+        if(!p || !room){
+          return socket.send(JSON.stringify({ t: "rejected", reason: "not in a match" }));
+        }
+        await room.onAnswer(p, { qIndex: msg.qIndex, value: msg.value});
+        return;
+      }
+      socket.send(JSON.stringify({ t: "rejected", reason: `unknown type ${msg.t}` }));
     });
 
     socket.on("close", (code: number) => {
-      clients.delete(socket);
-      console.log(`[close] ${client.id}  code=${code}  (${clients.size} connected)`);
+      const p = players.get(socket);
+      if(waiting && p && waiting.id === p.id) waiting = null;
+      players.delete(socket);
+      rooms.delete(socket);
+      console.log(`[close] ${p?.id ?? "?"} code=${code} (${players.size}) connected`);
     });
 
-    socket.on("error", (err: Error) => {
-      console.error(`[error] ${client.id}  ${err.message}`);
-    });
+    socket.on("error", (err: Error) => console.error(`[error] ${err.message}`));
   });
 
-  // Heartbeat sweep: reap any socket that didn't pong since the last sweep.
   const heartbeat = setInterval(() => {
-    for (const client of clients.values()) {
-      if (!client.isAlive) {
-        console.log(`[reap]  ${client.id}  (no pong)`);
-        client.socket.terminate();
-        continue;
-      }
-      client.isAlive = false; // will be flipped back true by the pong handler
-      client.socket.ping();
+    for(const [socket, player] of players) {
+      if(socket.readyState !== WebSocket.OPEN) continue;
+      player.lastPingAt = Date.now();
+      socket.ping();
     }
   }, HEARTBEAT_INTERVAL_MS);
 
   wss.on("close", () => clearInterval(heartbeat));
 
-  console.log(`ws gateway listening on :${port}`);
+  console.log(`ws gateway listening on : ${port}`);
   return wss;
 }
