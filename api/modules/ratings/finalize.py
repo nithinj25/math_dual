@@ -1,8 +1,12 @@
+import logging
 from datetime import datetime
 
 from db import pg_pool
+from modules.leaderboard import record_match
 
 from .glicko2 import DRAW, LOSS, WIN, Rating, update_duel
+
+log = logging.getLogger("mathduel.ratings")
 
 _UPSERT_RATING = """
     INSERT INTO ratings (user_id, tier, rating, rd, volatility, games_played, updated_at)
@@ -86,14 +90,21 @@ async def finalize_match(
             await conn.execute(_INSERT_HISTORY, p1, match_id, tier,
                                before1.rating, after1.rating, after1.rd)
             
-            await conn.execute(_INSERT_HISTORY, p2, match_id, tier, 
+            await conn.execute(_INSERT_HISTORY, p2, match_id, tier,
                                before2.rating, after2.rating, after2.rd)
-            
-            
-            return {
-                "match_id": match_id,
-                p1 : {"before": before1.rating, "after": after1.rating,
-                      "delta": after1.rating - before1.rating, "rd": after1.rd},
-                p2: {"before": before2.rating, "after": after2.rating, 
-                     "delta": after2.rating - before2.rating, "rd": after2.rd},
-            }
+
+    # The board is a derived hot view, so it lives OUTSIDE the transaction:
+    # Redis cannot be rolled back alongside Postgres. If this fails the ladder
+    # is still correct and the board rebuilds from the match record.
+    try:
+        await record_match(p1, p2, winner, tier)
+    except Exception as e:                              # noqa: BLE001
+        log.warning("leaderboard update failed for %s: %s", match_id, e)
+
+    return {
+        "match_id": match_id,
+        p1: {"before": before1.rating, "after": after1.rating,
+             "delta": after1.rating - before1.rating, "rd": after1.rd},
+        p2: {"before": before2.rating, "after": after2.rating,
+             "delta": after2.rating - before2.rating, "rd": after2.rd},
+    }
