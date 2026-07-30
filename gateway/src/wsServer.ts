@@ -2,6 +2,7 @@ import { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { DuelRoom, Player } from "./duelRoom.js";
+import { auth } from "./apiClient.js";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -31,13 +32,23 @@ export function startWsServer(port: number): WebSocketServer {
 
       if(msg.t === "join"){
         if(players.has(socket)) return;
+
+        let identity;
+        try {
+          identity = await auth.resolve(msg.token);
+        } catch {
+          socket.send(JSON.stringify({ t: "rejected", reason: "invalid token" }));
+          return socket.close(4001, "unauthorized");
+        }
+
         const player: Player = {
-          id: msg.name ?? `p_${randomUUID().slice(0, 6)}`,
+          id: identity.user_id,
+          name: identity.username,
           socket, rttMs: 0, lastPingAt: Date.now(),
         };
 
         players.set(socket, player);
-        console.log(`[join] ${player.id}`);
+        console.log(`[join] ${player.name} (${player.id})`);
 
         if(waiting === null){
           waiting = player;
@@ -48,7 +59,7 @@ export function startWsServer(port: number): WebSocketServer {
           waiting = null;
           const room = new DuelRoom(`m_${randomUUID().slice(0, 6)}`, pair);
           for (const p of pair) rooms.set(p.socket, room);
-          console.log(`[match] ${pair[0].id} vs ${pair[1].id}`);
+          console.log(`[match] ${pair[0].name} vs ${pair[1].name}`);
           room.start().catch(console.error);
         }
         return;
@@ -70,7 +81,7 @@ export function startWsServer(port: number): WebSocketServer {
       if(waiting && p && waiting.id === p.id) waiting = null;
       players.delete(socket);
       rooms.delete(socket);
-      console.log(`[close] ${p?.id ?? "?"} code=${code} (${players.size}) connected`);
+      console.log(`[close] ${p?.name ?? "?"} code=${code} (${players.size}) connected`);
     });
 
     socket.on("error", (err: Error) => console.error(`[error] ${err.message}`));

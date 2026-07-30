@@ -6,8 +6,8 @@ export class ApiError extends Error {
     }
 }
 
-async function call(method: string, path: string, body?:unknown): Promise<any> {
-    const res = await fetch(`${API}/internal/duels${path}`, {
+async function callAbs(method: string, path: string, body?:unknown): Promise<any> {
+    const res = await fetch(`${API}${path}`, {
         method,
         headers: { "Content-Type": "application/json"},
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -15,6 +15,10 @@ async function call(method: string, path: string, body?:unknown): Promise<any> {
     const data = await res.json().catch(() => ({}));
     if(!res.ok) throw new ApiError(res.status, data.detail ?? "api error");
     return data;
+}
+
+function call(method: string, path: string, body?:unknown): Promise<any> {
+    return callAbs(method, `/internal/duels${path}`, body);
 }
 
 export const api = {
@@ -29,6 +33,12 @@ export const api = {
         call("POST", `/${matchId}/rtt`, { player_id: playerId, rtt_ms: rttMs}),
 
     result: (matchId: string) => call("GET", `/${matchId}/result`),
+    finalize: (matchId: string) => call("POST", `/${matchId}/finalize`),
     close: (matchId: string) => call("DELETE", `/${matchId}`),
+};
+
+export const auth = {
+    resolve: (token: string) =>
+        callAbs("POST", "/internal/auth/resolve", { token }),
 };
 

@@ -2,7 +2,8 @@ import { WebSocket } from "ws";
 import { api, ApiError } from "./apiClient.js";
 
 export interface Player {
-    id: string;
+    id: string;          // real users.id UUID
+    name: string;        // display name
     socket: WebSocket;
     rttMs: number;
     lastPingAt: number;
@@ -30,7 +31,7 @@ export class DuelRoom {
         await api.create(this.matchId, seed, TIER, this.players.map((p) => p.id));
 
         for(const p of this.players){
-            this.send(p, { t: "matched", matchId: this.matchId, opponent: { name: this.other(p).id }, tier: TIER});
+            this.send(p, { t: "matched", matchId: this.matchId, opponent: { name: this.other(p).name }, tier: TIER});
         }
 
         const { starts_in_ms } = await api.countdown(this.matchId);
@@ -87,11 +88,22 @@ export class DuelRoom {
         try {
             await api.tick(this.matchId);
             const r = await api.result(this.matchId);
+
+            // rate the match before the duel is evicted
+            const deltas: Record<string, number> = {};
+            try {
+                const fin = await api.finalize(this.matchId);
+                for(const p of this.players) deltas[p.id] = Math.round(fin[p.id]?.delta ?? 0);
+            } catch (err) {
+                const why = err instanceof ApiError ? err.message : String(err);
+                console.error(`[finalize] ${this.matchId}: ${why}`);   // match still ends
+            }
+
             for(const p of this.players){
                 this.send(p, { t: "end",
                                winner: r.winner === null ? "draw" : (r.winner === p.id ? "you" : "them"),
                                score: [r.scores[p.id], r.scores[this.other(p).id]],
-                               ratingDelta: 0 });      // real value arrives in M5
+                               ratingDelta: deltas[p.id] ?? 0 });
             }
         } catch (err) {
             const reason = err instanceof ApiError ? err.message : String(err);

@@ -1,10 +1,13 @@
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from modules.ratings import finalize_match
+
 from .registry import DuelNotFound, create_duel, evict_duel, get_duel
-from .state import COUNTDOWN_MS, Duel, IllegalActions
+from .state import COUNTDOWN_MS, Duel, DuelStatus, IllegalActions
 
 router = APIRouter(prefix="/internal/duels", tags=["duels"])
 
@@ -103,6 +106,26 @@ def result(match_id: str):
         return duel.result()
     except IllegalActions as e:
         raise HTTPException(409, str(e))
+    
+@router.post("/{match_id}/finalize")
+async def finalize(match_id: str):
+    """Rate a finished duel: match row + both ratings + both history rows,
+    all in one transaction."""
+    duel = _get(match_id)
+    if duel.status is not DuelStatus.FINISHED:
+        raise HTTPException(409, f"duel is {duel.status.value}, not finished")
+
+    outcome = duel.result()
+    p1, p2 = list(duel.players.values())
+    started = (datetime.fromtimestamp(duel.started_at, tz=timezone.utc)
+               if duel.started_at is not None else None)
+
+    return await finalize_match(
+        match_id=duel.match_id, tier=duel.tier, seed=duel.seed,
+        p1=p1.player_id, p2=p2.player_id,
+        p1_score=p1.score, p2_score=p2.score,
+        winner=outcome["winner"], started_at=started,
+    )
     
 @router.delete("/{match_id}")
 def close(match_id: str):
