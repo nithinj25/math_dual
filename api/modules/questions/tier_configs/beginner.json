@@ -1,0 +1,10 @@
+{
+  "questionCount": 20,
+  "buckets": [
+    { "template": "add_sub",  "digits": [1, 1], "carryRequired": false, "weight": 0.40, "difficulty": 1 },
+    { "template": "multiply", "digits": [1, 1], "weight": 0.25, "difficulty": 2 },
+    { "template": "square",   "max": 10, "weight": 0.20, "difficulty": 2 },
+    { "template": "divide",   "divisorDigits": 1, "exact": true, "weight": 0.15, "difficulty": 3 }
+  ],
+  "ramp": "easyThirdFirst"
+}

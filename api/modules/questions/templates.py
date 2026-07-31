@@ -1,6 +1,7 @@
 """"One generator function per question template. Each takes the seeded
 RNG and that bucket's config dict, returns (prompt, answer, tags)"""
 
+import math
 import random
 
 def _digits(n: int, width: int) -> list[int]:
@@ -75,9 +76,16 @@ def gen_square(rng: random.Random, bucket: dict) -> tuple[str, int, list[str]]:
 
 
 def gen_percent(rng: random.Random, bucket: dict) -> tuple[str, int, list[str]]:
-    percents = [10, 20, 25, 50, 75] if bucket.get("ofRound") else list(range(1, 100))
-    pct = rng.choice(percents)
-    base = rng.randint(1, 20) * 20
+    if bucket.get("ofRound"):
+        pct = rng.choice([10, 20, 25, 50, 75])
+        base = rng.randint(1, 20) * 20          # always divides exactly
+    else:
+        # Any percent, but pick a base that still gives a whole answer:
+        # base * pct must be divisible by 100, so base must be a multiple
+        # of 100 / gcd(pct, 100).
+        pct = rng.randint(1, 99)
+        step = 100 // math.gcd(pct, 100)
+        base = rng.randint(1, max(1, 600 // step)) * step
     return f"{pct}% of {base}", base * pct // 100, ["percent"]
 
 
