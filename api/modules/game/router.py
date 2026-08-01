@@ -8,6 +8,7 @@ from modules.ratings import finalize_match
 
 from .registry import DuelNotFound, create_duel, evict_duel, get_duel
 from .state import COUNTDOWN_MS, Duel, DuelStatus, IllegalActions
+from .room import create_room, drop_room, get_room, room_of_player, set_status
 
 router = APIRouter(prefix="/internal/duels", tags=["duels"])
 
@@ -41,14 +42,40 @@ def _state(duel: Duel) -> dict:
     }
     
 @router.post("")
-def create(req: CreateDuelRequest):
+async def create(req: CreateDuelRequest):
     try:
         duel = create_duel(req.match_id, req.seed, req.tier,
                            req.player_ids, req.duration_seconds)
     except IllegalActions as e:
         raise HTTPException(409, str(e))
+    await create_room(req.match_id, req.tier, req.seed, req.player_ids)
     return {**_state(duel), "tier": duel.tier,
             "question_count": len(duel.questions)}
+
+
+# NOTE: these must stay ABOVE the "/{match_id}/..." routes. FastAPI matches
+# in declaration order, so declared later "rooms" would be swallowed as a
+# match_id and these would never be reached.
+
+@router.get("/rooms/by-player/{user_id}")
+async def my_room(user_id: str):
+    """Which match is this player in? Used by a reconnecting gateway."""
+    match_id = await room_of_player(user_id)
+    if match_id is None:
+        raise HTTPException(404, "not in a match")
+    found = await get_room(match_id)
+    if found is None:
+        raise HTTPException(404, "room expired")
+    return found
+
+
+@router.get("/rooms/{match_id}")
+async def room(match_id: str):
+    found = await get_room(match_id)
+    if found is None:
+        raise HTTPException(404, "no such room")
+    return found
+
 
 @router.post("/{match_id}/countdown")
 def countdown(match_id: str):
@@ -128,8 +155,8 @@ async def finalize(match_id: str):
     )
     
 @router.delete("/{match_id}")
-def close(match_id: str):
+async def close(match_id: str):
     evict_duel(match_id)
+    await drop_room(match_id)
     return {"evicted": match_id}
 
-    
