@@ -35,10 +35,20 @@ export const api = {
     result: (matchId: string) => call("GET", `/${matchId}/result`),
     finalize: (matchId: string) => call("POST", `/${matchId}/finalize`),
     close: (matchId: string) => call("DELETE", `/${matchId}`),
+    myRoom: (userId: string) => call("GET", `/rooms/by-player/${userId}`),
 };
 
 export const auth = {
     resolve: (token: string) =>
         callAbs("POST", "/internal/auth/resolve", { token }),
+};
+
+export const mm = {
+    join: (userId: string, waitedSeconds: number) =>
+        callAbs("POST", "/internal/matchmaking/join",
+                { user_id: userId, waited_seconds: waitedSeconds }),
+    leave: (userId: string, tier: string) =>
+        callAbs("POST", "/internal/matchmaking/leave",
+                { user_id: userId, tier }),
 };
 

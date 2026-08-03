@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from modules.ratings import finalize_match
+from modules.ratings.finalize import AlreadyRated
 
 from .registry import DuelNotFound, create_duel, evict_duel, get_duel
 from .state import COUNTDOWN_MS, Duel, DuelStatus, IllegalActions
@@ -147,12 +148,15 @@ async def finalize(match_id: str):
     started = (datetime.fromtimestamp(duel.started_at, tz=timezone.utc)
                if duel.started_at is not None else None)
 
-    return await finalize_match(
-        match_id=duel.match_id, tier=duel.tier, seed=duel.seed,
-        p1=p1.player_id, p2=p2.player_id,
-        p1_score=p1.score, p2_score=p2.score,
-        winner=outcome["winner"], started_at=started,
-    )
+    try:
+        return await finalize_match(
+            match_id=duel.match_id, tier=duel.tier, seed=duel.seed,
+            p1=p1.player_id, p2=p2.player_id,
+            p1_score=p1.score, p2_score=p2.score,
+            winner=outcome["winner"], started_at=started,
+        )
+    except AlreadyRated:
+        raise HTTPException(409, "already rated")
     
 @router.delete("/{match_id}")
 async def close(match_id: str):

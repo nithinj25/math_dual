@@ -17,7 +17,8 @@ def channel(match_id: str) -> str:
     return f"match:{match_id}"
 
 async def create_room(match_id: str, tier: str, seed: int,
-                      player_ids: list[str])-> None:
+                      player_ids: list[str],
+                      names: dict[str, str] | None = None)-> None:
     
     """everything a gateway needs to server this match without 
     having been that started it"""
@@ -28,6 +29,7 @@ async def create_room(match_id: str, tier: str, seed: int,
         "tier": tier,
         "seed": str(seed),
         "players": json.dumps(player_ids),
+        "names": json.dumps(names or {}),
         "status": "matched",
     })
     pipe.expire(room_key(match_id), ROOM_TTL_SECONDS)
@@ -42,6 +44,7 @@ async def get_room(match_id: str) -> dict | None:
     
     room = { _s(k): _s(v) for k, v in raw.items()}
     room["players"] = json.loads(room["players"])
+    room["names"] = json.loads(room.get("names", "{}"))
     room["seed"] = int(room["seed"])
     return room
 

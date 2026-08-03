@@ -1,12 +1,19 @@
 import logging
 from datetime import datetime
 
+import asyncpg
+
 from db import pg_pool
 from modules.leaderboard import record_match
 
 from .glicko2 import DRAW, LOSS, WIN, Rating, update_duel
 
 log = logging.getLogger("mathduel.ratings")
+
+
+class AlreadyRated(Exception):
+    """This match has already been finalized. With two gateways, both may
+    try — the matches primary key decides which one wins."""
 
 _UPSERT_RATING = """
     INSERT INTO ratings (user_id, tier, rating, rd, volatility, games_played, updated_at)
@@ -75,9 +82,12 @@ async def finalize_match(
             after1 = update_duel(before1, before2, s1)
             after2 = update_duel(before2, before1, s2)
             
-            await conn.execute(_INSERT_MATCH, match_id, tier, seed,
-                               tier_config_version, p1, p2, p2_is_bot,
-                               winner, p1_score, p2_score, started_at)
+            try:
+                await conn.execute(_INSERT_MATCH, match_id, tier, seed,
+                                   tier_config_version, p1, p2, p2_is_bot,
+                                   winner, p1_score, p2_score, started_at)
+            except asyncpg.UniqueViolationError:
+                raise AlreadyRated(match_id)
             
             if _crash_after_match_insert:
                 raise RuntimeError("deliberate crash after match insert")
