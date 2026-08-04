@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from modules.events import TOPIC_ANSWERS, TOPIC_MATCHES, emit
 from modules.ratings import finalize_match
 from modules.ratings.finalize import AlreadyRated
 
@@ -50,6 +51,12 @@ async def create(req: CreateDuelRequest):
     except IllegalActions as e:
         raise HTTPException(409, str(e))
     await create_room(req.match_id, req.tier, req.seed, req.player_ids)
+
+    emit(TOPIC_MATCHES, req.match_id, "match_started", {
+        "matchId": req.match_id, "tier": req.tier, "seed": req.seed,
+        "configVersion": 1,
+        "p1": req.player_ids[0], "p2": req.player_ids[1], "p2IsBot": False,
+    })
     return {**_state(duel), "tier": duel.tier,
             "question_count": len(duel.questions)}
 
@@ -79,7 +86,7 @@ async def room(match_id: str):
 
 
 @router.post("/{match_id}/countdown")
-def countdown(match_id: str):
+async def countdown(match_id: str):
     duel = _get(match_id)
     try:
         duel.begin_countdown(time.time())
@@ -89,13 +96,13 @@ def countdown(match_id: str):
     return {**_state(duel), "starts_in_ms" : COUNTDOWN_MS}
 
 @router.post("/{match_id}/tick")
-def tick(match_id: str):
+async def tick(match_id: str):
     duel = _get(match_id)
     duel.tick(time.time())
     return _state(duel)
 
 @router.get("/{match_id}/questions/{player_id}")
-def question(match_id: str, player_id: str):
+async def question(match_id: str, player_id: str):
     duel = _get(match_id)
     player = duel.players.get(player_id)
     if player is None:
@@ -106,20 +113,32 @@ def question(match_id: str, player_id: str):
     q = duel.questions[player.position]
     now = time.time()
     duel.mark_served(player_id, now)
+
+    emit(TOPIC_ANSWERS, match_id, "question_served", {
+        "matchId": match_id, "userId": player_id, "qIndex": q.q_index,
+        "template": q.template, "bucketTags": q.bucket_tags, "servedTs": now,
+    })
     return { "q_index": q.q_index, "prompt": q.prompt, "served_ts": now}
 
 @router.post("/{match_id}/answer")
-def answer(match_id: str, req: AnswerRequest):
+async def answer(match_id: str, req: AnswerRequest):
     duel = _get(match_id)
     try:
         correct = duel.submit_answer(req.player_id, req.q_index, req.value, time.time())
     except IllegalActions as e:
         raise HTTPException(409, str(e))
+
+    player = duel.players[req.player_id]
+    emit(TOPIC_ANSWERS, match_id, "answer_submitted", {
+        "matchId": match_id, "userId": req.player_id, "qIndex": req.q_index,
+        "correct": correct, "value": req.value,
+        "solveMs": round(player.last_solve_ms),
+    })
     return { **_state(duel), "correct": correct,
-            "position": duel.players[req.player_id].position}
+            "position": player.position}
     
 @router.post("/{match_id}/rtt")
-def rtt(match_id: str, req: RttRequest):
+async def rtt(match_id: str, req: RttRequest):
     duel = _get(match_id)
     player = duel.players.get(req.player_id)
     if player is None:
@@ -128,7 +147,7 @@ def rtt(match_id: str, req: RttRequest):
     return {"player_id": req.player_id, "rtt_ms": player.rtt_ms}
 
 @router.get("/{match_id}/result")
-def result(match_id: str):
+async def result(match_id: str):
     duel = _get(match_id)
     try:
         return duel.result()
@@ -149,7 +168,7 @@ async def finalize(match_id: str):
                if duel.started_at is not None else None)
 
     try:
-        return await finalize_match(
+        rated = await finalize_match(
             match_id=duel.match_id, tier=duel.tier, seed=duel.seed,
             p1=p1.player_id, p2=p2.player_id,
             p1_score=p1.score, p2_score=p2.score,
@@ -157,6 +176,16 @@ async def finalize(match_id: str):
         )
     except AlreadyRated:
         raise HTTPException(409, "already rated")
+
+    # Emitted only by the gateway that actually rated it, so the log has
+    # exactly one match_finished per match even with two gateways racing.
+    emit(TOPIC_MATCHES, match_id, "match_finished", {
+        "matchId": match_id, "tier": duel.tier, "winner": outcome["winner"],
+        "scores": outcome["scores"], "solveMs": outcome["solve_ms"],
+        "ratingDeltas": {pid: round(rated[pid]["delta"], 2)
+                         for pid in (p1.player_id, p2.player_id)},
+    })
+    return rated
     
 @router.delete("/{match_id}")
 async def close(match_id: str):

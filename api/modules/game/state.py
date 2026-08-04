@@ -30,6 +30,7 @@ class PlayerState:
     rtt_ms: float = 0.0            # measured by the gateway's pings
     served_at: float | None = None  # when the current question was dispatched
     total_solve_ms: float = 0.0     # sum of estimated solve times
+    last_solve_ms: float = 0.0      # the most recent one, for the event log
 
 
 @dataclass
@@ -98,7 +99,8 @@ class Duel:
         # latency fairness: estimated solve time, not arrival order
         if player.served_at is not None:
             solve_ms = (now - player.served_at) * 1000.0 - (player.rtt_ms / 2.0)
-            player.total_solve_ms += max(0.0, solve_ms)
+            player.last_solve_ms = max(0.0, solve_ms)
+            player.total_solve_ms += player.last_solve_ms
         player.served_at = None
 
         correct = answer == self.questions[q_index].answer  # authoritative

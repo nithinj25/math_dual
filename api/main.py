@@ -9,6 +9,7 @@ from modules.leaderboard.router import router as leaderboard_router
 from modules.matchmaking.router import router as matchmaking_router
 from db import connect, disconnect
 from modules.auth.dependencies import get_current_user
+from modules.events import start as kafka_start, stop as kafka_stop
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mathduel.api")
@@ -16,10 +17,12 @@ log = logging.getLogger("mathduel.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect()
-    log.info("connected: postgress + redis")
+    await kafka_start()          # tolerates Kafka being down
+    log.info("connected: postgres + redis")
     yield
+    await kafka_stop()
     await disconnect()
-    
+
 app = FastAPI(title="MathDuel API", lifespan=lifespan)
 app.include_router(duel_router)
 app.include_router(auth_router)
