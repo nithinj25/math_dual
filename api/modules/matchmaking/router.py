@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from db import pg_pool
+from modules.events import TOPIC_MATCHES, emit
 from modules.game.registry import create_duel
 from modules.game.room import create_room, get_room, room_of_player
 
@@ -46,6 +47,13 @@ async def join(req: JoinRequest):
     players = [req.user_id, opponent]
     create_duel(match_id, seed, tier, players)
     await create_room(match_id, tier, seed, players, await _names(players))
+
+    # This is the real creation path — the /internal/duels endpoint is only
+    # used by tests — so match_started has to be emitted here too.
+    emit(TOPIC_MATCHES, match_id, "match_started", {
+        "matchId": match_id, "tier": tier, "seed": seed, "configVersion": 1,
+        "p1": players[0], "p2": players[1], "p2IsBot": False,
+    })
 
     return {"matched": True, "match_id": match_id, "opponent": opponent,
             "room": await get_room(match_id)}

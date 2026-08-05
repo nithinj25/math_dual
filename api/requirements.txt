@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 PyJWT[crypto]==2.9.0
 aiokafka==0.14.0
 pytest
+websockets==16.1.1
