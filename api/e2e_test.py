@@ -362,6 +362,7 @@ async def kafka_stage(match_id: str | None) -> None:
     # getmany honours its timeout even when nothing arrives; `async for`
     # would block forever once the topic is drained.
     kinds: dict[str, int] = {}
+    sample: dict = {}
     try:
         deadline = time.time() + 25
         while time.time() < deadline:
@@ -376,6 +377,8 @@ async def kafka_stage(match_id: str | None) -> None:
                     if e.get("matchId") == match_id:
                         kind = e.get("kind", "?")
                         kinds[kind] = kinds.get(kind, 0) + 1
+                        if kind == "answer_submitted" and not sample:
+                            sample = e
             if kinds.get("match_finished"):
                 break                          # seen the whole match
     except Exception:
@@ -390,6 +393,15 @@ async def kafka_stage(match_id: str | None) -> None:
           kinds.get("answer_submitted", 0) >= 40, str(kinds.get("answer_submitted", 0)))
     check("match_finished emitted exactly once",
           kinds.get("match_finished", 0) == 1)
+
+    # Shape, not just count. ClickHouse ingests these fields directly, so a
+    # missing one would only surface as an empty analytics column later.
+    need = ("tier", "template", "bucketTags", "ratingAtPlay", "solveMs", "correct")
+    missing = [f for f in need if f not in sample] if sample else list(need)
+    check("answer_submitted carries the fields ClickHouse needs",
+          not missing, "missing: " + ", ".join(missing) if missing else
+          f"{sample.get('template')} / {sample.get('bucketTags')} / "
+          f"rating {sample.get('ratingAtPlay')}")
 
 
 # ---------------------------------------------------------------- main

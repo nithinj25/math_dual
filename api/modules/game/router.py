@@ -20,6 +20,7 @@ class CreateDuelRequest(BaseModel):
     tier: str
     player_ids: list[str]
     duration_seconds: int = 120
+    ratings: dict[str, float] | None = None
     
 class AnswerRequest(BaseModel):
     player_id: str
@@ -47,7 +48,7 @@ def _state(duel: Duel) -> dict:
 async def create(req: CreateDuelRequest):
     try:
         duel = create_duel(req.match_id, req.seed, req.tier,
-                           req.player_ids, req.duration_seconds)
+                           req.player_ids, req.duration_seconds, req.ratings)
     except IllegalActions as e:
         raise HTTPException(409, str(e))
     await create_room(req.match_id, req.tier, req.seed, req.player_ids)
@@ -129,10 +130,16 @@ async def answer(match_id: str, req: AnswerRequest):
         raise HTTPException(409, str(e))
 
     player = duel.players[req.player_id]
+    q = duel.questions[req.q_index]
     emit(TOPIC_ANSWERS, match_id, "answer_submitted", {
         "matchId": match_id, "userId": req.player_id, "qIndex": req.q_index,
         "correct": correct, "value": req.value,
         "solveMs": round(player.last_solve_ms),
+        # self-contained for analytics: no correlation with question_served
+        "tier": duel.tier,
+        "template": q.template,
+        "bucketTags": q.bucket_tags,
+        "ratingAtPlay": round(player.rating_at_play),
     })
     return { **_state(duel), "correct": correct,
             "position": player.position}

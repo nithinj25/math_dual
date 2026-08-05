@@ -31,6 +31,10 @@ class PlayerState:
     served_at: float | None = None  # when the current question was dispatched
     total_solve_ms: float = 0.0     # sum of estimated solve times
     last_solve_ms: float = 0.0      # the most recent one, for the event log
+    rating_at_play: float = 1500.0  # frozen at creation: ratings move at
+                                    # finalization, and stamping the post-match
+                                    # value onto every answer would corrupt the
+                                    # "solve time by rating band" analysis
 
 
 @dataclass
@@ -47,10 +51,14 @@ class Duel:
 
     @classmethod
     def create(cls, match_id: str, seed: int, tier: str,
-               player_ids: list[str], duration_seconds: int = 120) -> "Duel":
+               player_ids: list[str], duration_seconds: int = 120,
+               ratings: dict[str, float] | None = None) -> "Duel":
         config = load_tier_config(tier)
         questions = generate_questions(seed, config)
-        players = {pid: PlayerState(player_id=pid) for pid in player_ids}
+        ratings = ratings or {}
+        players = {pid: PlayerState(player_id=pid,
+                                    rating_at_play=ratings.get(pid, 1500.0))
+                   for pid in player_ids}
         return cls(match_id, seed, tier, duration_seconds, questions, players)
 
     # ---- transitions ----

@@ -45,7 +45,12 @@ async def join(req: JoinRequest):
     match_id = f"m_{uuid4().hex[:8]}"
     seed = random.getrandbits(31)
     players = [req.user_id, opponent]
-    create_duel(match_id, seed, tier, players)
+    # The Lua returns only the opponent's id, so their rating needs a second
+    # lookup. Once per match creation, not per answer.
+    _, opp_rating = await rating_and_tier(opponent)
+    ratings = {req.user_id: rating, opponent: opp_rating}
+
+    create_duel(match_id, seed, tier, players, ratings=ratings)
     await create_room(match_id, tier, seed, players, await _names(players))
 
     # This is the real creation path — the /internal/duels endpoint is only

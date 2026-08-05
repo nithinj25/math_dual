@@ -9,13 +9,15 @@ class DuelNotFound(Exception):
     """No live duel with that match_id"""
     
 def create_duel(match_id: str, seed: int, tier: str,
-                playre_ids: list[str], duration_seconds: int = 120) -> Duel:
-    
+                player_ids: list[str], duration_seconds: int = 120,
+                ratings: dict[str, float] | None = None) -> Duel:
+
     if match_id in _duels:
-        raise IllegalActions(f"duel {match_id} already exits")
-    duel = Duel.create(match_id, seed, tier, playre_ids, duration_seconds)
+        raise IllegalActions(f"duel {match_id} already exists")
+    duel = Duel.create(match_id, seed, tier, player_ids,
+                       duration_seconds, ratings)
     _duels[match_id] = duel
-    
+
     return duel
 
 def get_duel(match_id: str) -> Duel:
