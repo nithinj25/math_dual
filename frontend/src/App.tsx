@@ -1,32 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { MotionConfig } from "motion/react";
+import {
+  Copy, Handshake, LogOut, Play, ScrollText, Skull, Swords, Terminal, Trophy, Zap,
+} from "lucide-react";
 
-import Header, { type View } from "./components/Header";
-import ProtocolLog, { type LogEntry } from "./components/ProtocolLog";
-import Toasts, { type Toast } from "./components/Toasts";
-import Duel from "./screens/Duel";
+import TopBar, { type View } from "./components/TopBar";
+import ProtocolDrawer, { type LogEntry } from "./components/ProtocolDrawer";
 import Landing from "./screens/Landing";
+import Login from "./screens/Login";
+import Duel from "./screens/Duel";
 import Leaderboard from "./screens/Leaderboard";
 import Lobby from "./screens/Lobby";
 import Queue from "./screens/Queue";
 import Result from "./screens/Result";
 import System from "./screens/System";
-import Arena from "./three/Arena";
 import { health, me as fetchMe, onApiCall, type Me } from "./lib/api";
 import { EMPTY_DUEL, TOTAL_QUESTIONS, type DuelState, type Phase } from "./lib/duel";
 import { onAuth, signIn, signOut } from "./lib/supabase";
+import { go, replace, useRoute } from "./lib/route";
 import { DuelSocket, type Frame, type ServerMsg, type Status } from "./lib/socket";
-import "./App.css";
+import { CommandPalette, type Action } from "./ui/CommandPalette";
+import { Skeleton } from "./ui/primitives";
+import { Toaster, type Toast } from "./ui/Toaster";
+import { TooltipProvider } from "./ui/Tooltip";
 
 type End = Extract<ServerMsg, { t: "end" }>;
 
 const LOG_CAP = 200;
 
+// The protocol drawer, the command palette and the System screen are build
+// tools, not features. Players never see them; `npm run dev` still does.
+const DEV = import.meta.env.DEV;
+
 export default function App() {
+  const route = useRoute();
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [me, setMe] = useState<Me | null>(null);
   const [meError, setMeError] = useState<string | null>(null);
@@ -43,15 +56,13 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [logOpen, setLogOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
-  // Bumped counters — the arena flashes whenever one of these changes.
-  const [meFlash, setMeFlash] = useState(0);
-  const [themFlash, setThemFlash] = useState(0);
   const sock = useRef<DuelSocket | null>(null);
 
-  const toast = useCallback((text: string, kind?: Toast["kind"], icon?: string) => {
+  const toast = useCallback((text: string, tone?: Toast["tone"], icon?: ReactNode) => {
     const id = Date.now() + Math.random();
-    setToasts((list) => [...list, { id, text, kind, icon }]);
+    setToasts((list) => [...list, { id, text, tone, icon }]);
     setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 3600);
   }, []);
 
@@ -125,7 +136,7 @@ export default function App() {
               });
         setEnded(null);
         setPhase((p) => (p === "live" ? "live" : "countdown"));
-        toast(`Matched with ${m.opponent.name} · ${m.tier}`, "them", "⚔️");
+        toast(`Matched with ${m.opponent.name} · ${m.tier}`, "them", <Swords size={13} />);
         break;
 
       case "countdown":
@@ -161,18 +172,16 @@ export default function App() {
             last: { qIndex: m.qIndex, correct: m.correct, at: Date.now() },
           };
         });
-        if (m.correct) setMeFlash((n) => n + 1);
         break;
 
       case "opp":
         setDuel((d) => ({ ...d, oppAt: Math.max(d.oppAt, m.qIndex + 1) }));
-        setThemFlash((n) => n + 1);
         break;
 
       case "rejected":
         // Transient. The gateway always re-serves our question after this.
         setDuel((d) => ({ ...d, rejected: m.reason }));
-        toast(m.reason, "bad", "⚠️");
+        toast(m.reason, "bad", <Zap size={13} />);
         break;
 
       case "end":
@@ -180,8 +189,8 @@ export default function App() {
         setPhase("over");
         toast(
           m.winner === "you" ? "You won the duel" : m.winner === "them" ? "You lost this one" : "A draw",
-          m.winner === "you" ? "good" : m.winner === "them" ? "bad" : "",
-          m.winner === "you" ? "🏆" : m.winner === "them" ? "💀" : "🤝",
+          m.winner === "you" ? "good" : m.winner === "them" ? "bad" : "neutral",
+          m.winner === "you" ? <Trophy size={13} /> : m.winner === "them" ? <Skull size={13} /> : <Handshake size={13} />,
         );
         // Nothing follows an end frame, so release the socket — but only if
         // "play again" has not already replaced it in the meantime.
@@ -219,7 +228,7 @@ export default function App() {
       onMsg: handle,
       onStatus: (st, attempt) => {
         setStatus(st);
-        if (st === "closed" && attempt > 0) toast("Reconnecting to the gateway…", "bad", "⚡");
+        if (st === "closed" && attempt > 0) toast("Reconnecting to the gateway…", "bad", <Zap size={13} />);
       },
       onFrame,
     });
@@ -236,122 +245,203 @@ export default function App() {
     setStatus("idle");
   }, []);
 
-  // Drives the arena: which way the field leans, and how alive it is.
-  const balance = Math.max(-1, Math.min(1, (duel.yourScore - duel.oppScore) / 8));
-  const energy =
-    phase === "live" ? 1 : phase === "countdown" ? 0.7 : phase === "queued" ? 0.4 : 0.15;
-  const arena = (
-    <Arena balance={balance} energy={energy} meFlash={meFlash} themFlash={themFlash} />
+  const inMatch = phase === "queued" || phase === "countdown" || phase === "live";
+
+  // Landing is always reachable; the other two depend on being signed in.
+  useEffect(() => {
+    if (!authReady) return;
+    if (route === "play" && !session) replace("login");
+    if (route === "login" && session) replace("play");
+  }, [route, session, authReady]);
+
+  useEffect(() => {
+    if (!DEV) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const actions = useMemo<Action[]>(() => {
+    if (!DEV) return [];
+    const list: Action[] = [];
+    if (!inMatch) {
+      list.push(
+        { id: "play", group: "Match", label: "Find a match", hint: "↵", icon: <Play size={13} />, run: play },
+        { id: "board", group: "Go to", label: "Leaderboard", icon: <Trophy size={13} />, run: () => setView("board") },
+        { id: "system", group: "Go to", label: "System", icon: <Terminal size={13} />, run: () => setView("system") },
+        { id: "lobby", group: "Go to", label: "Lobby", icon: <Swords size={13} />, run: () => setView("play") },
+      );
+    } else {
+      list.push({
+        id: "leave", group: "Match", label: phase === "queued" ? "Leave the queue" : "Forfeit this duel",
+        icon: <Skull size={13} />, run: leave,
+      });
+    }
+    list.push({
+      id: "protocol", group: "Debug",
+      label: logOpen ? "Hide the protocol log" : "Show the protocol log",
+      hint: `${log.length} entries`, icon: <ScrollText size={13} />,
+      run: () => setLogOpen((o) => !o),
+    });
+    if (me) {
+      list.push(
+        { id: "copy", group: "Account", label: "Copy user id", hint: me.username, icon: <Copy size={13} />, run: () => navigator.clipboard?.writeText(me.id) },
+        { id: "out", group: "Account", label: "Sign out", icon: <LogOut size={13} />, run: () => { leave(); signOut(); } },
+      );
+    }
+    return list;
+  }, [inMatch, phase, play, leave, logOpen, log.length, me]);
+
+  // reducedMotion="user" is the JS half of the media query in styles.css:
+  // without it, motion keeps animating for people who asked it not to.
+  const shell = (children: ReactNode) => (
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider>
+        <div className="backdrop" />
+        <div className="flex min-h-dvh flex-col">{children}</div>
+        <Toaster items={toasts} />
+      </TooltipProvider>
+    </MotionConfig>
   );
 
   if (!authReady) {
-    return (
+    return shell(
+      <div className="flex flex-1 items-center justify-center">
+        <Skeleton className="h-4 w-40" />
+      </div>,
+    );
+  }
+
+  const startSignIn = () => {
+    setAuthError(null);
+    setSigningIn(true);
+    signIn()
+      .catch((e: Error) => setAuthError(e.message))
+      .finally(() => setSigningIn(false));
+  };
+
+  const publicBar = (onSignIn?: () => void) => (
+    <TopBar
+      me={null}
+      view={view}
+      onView={setView}
+      apiOk={apiOk}
+      ws="idle"
+      showNav={false}
+      dev={DEV}
+      onCommand={() => setPaletteOpen(true)}
+      onSignOut={signOut}
+      onSignIn={onSignIn}
+      onHome={() => go("home")}
+    />
+  );
+
+  if (route === "home") {
+    return shell(
       <>
-        {arena}
-        <div className="app">
-          <div className="page middle center">
-            <div className="shimmer" style={{ width: "12rem", height: "1.2rem" }} />
-          </div>
-        </div>
-      </>
+        {publicBar(session ? undefined : () => go("login"))}
+        <Landing
+          signedIn={!!session}
+          onStart={() => go(session ? "play" : "login")}
+        />
+      </>,
     );
   }
 
   if (!session) {
-    return (
+    return shell(
       <>
-        {arena}
-        <div className="app">
-          <Header
-            me={null}
-            view={view}
-            onView={setView}
-            apiOk={apiOk}
-            ws="idle"
-            showNav={false}
-            onSignOut={signOut}
-          />
-          <Landing
-            busy={signingIn}
-            error={authError}
-            onSignIn={() => {
-              setAuthError(null);
-              setSigningIn(true);
-              signIn()
-                .catch((e: Error) => setAuthError(e.message))
-                .finally(() => setSigningIn(false));
-            }}
-          />
-        </div>
-      </>
+        {publicBar()}
+        <Login
+          busy={signingIn}
+          error={authError}
+          onSignIn={startSignIn}
+          onBack={() => go("home")}
+        />
+      </>,
     );
   }
 
-  const inMatch = phase === "queued" || phase === "countdown" || phase === "live";
   const displayName = me?.username ?? session.user.email?.split("@")[0] ?? "you";
 
-  return (
+  return shell(
     <>
-      {arena}
-      <div className="app">
-        <Header
-          me={me}
-          view={view}
-          onView={setView}
-          apiOk={apiOk}
-          ws={status}
-          showNav={!inMatch}
-          onSignOut={() => { leave(); signOut(); }}
+      <TopBar
+        me={me}
+        view={view}
+        onView={setView}
+        apiOk={apiOk}
+        ws={status}
+        showNav={!inMatch}
+        dev={DEV}
+        onCommand={() => setPaletteOpen(true)}
+        onSignOut={() => { leave(); signOut(); go("home"); }}
+        onHome={() => go("home")}
+      />
+
+      {phase === "queued" ? (
+        <Queue since={queuedAt} searchWindow={searchWindow} ws={status} onCancel={leave} />
+      ) : phase === "countdown" || phase === "live" ? (
+        <Duel
+          state={duel}
+          phase={phase}
+          status={status}
+          meName={displayName}
+          onAnswer={(v) => sock.current?.answer(duel.qIndex, v)}
+          onLeave={leave}
         />
-
-        {phase === "queued" ? (
-          <Queue since={queuedAt} searchWindow={searchWindow} ws={status} onCancel={leave} />
-        ) : phase === "countdown" || phase === "live" ? (
-          <Duel
-            state={duel}
-            phase={phase}
-            status={status}
-            meName={displayName}
-            onAnswer={(v) => sock.current?.answer(duel.qIndex, v)}
-            onLeave={leave}
-          />
-        ) : phase === "over" && ended ? (
-          <Result
-            end={ended}
-            duel={duel}
-            me={me}
-            onAgain={play}
-            onHome={leave}
-            onBoard={() => { leave(); setView("board"); }}
-          />
-        ) : view === "board" ? (
-          <Leaderboard me={me} />
-        ) : view === "system" ? (
-          <System me={me} ws={status} />
-        ) : (
-          <Lobby
-            me={me}
-            meError={meError}
-            onPlay={play}
-            onOpenBoard={() => setView("board")}
-          />
-        )}
-      </div>
-
-      <Toasts items={toasts} />
-
-      {logOpen ? (
-        <ProtocolLog entries={log} onClose={() => setLogOpen(false)} onClear={() => setLog([])} />
+      ) : phase === "over" && ended ? (
+        <Result
+          end={ended}
+          duel={duel}
+          me={me}
+          onAgain={play}
+          onHome={leave}
+          onBoard={() => { leave(); setView("board"); }}
+        />
+      ) : view === "board" ? (
+        <Leaderboard me={me} />
+      ) : view === "system" && DEV ? (
+        <System me={me} ws={status} />
       ) : (
-        <button
-          className="btn ghost small log-toggle"
-          onClick={() => setLogOpen(true)}
-          title="Show the live protocol: websocket frames and HTTP calls"
-        >
-          ⌥ protocol
-        </button>
+        <Lobby
+          me={me}
+          meError={meError}
+          onPlay={play}
+          onOpenBoard={() => setView("board")}
+        />
       )}
-    </>
+
+      {DEV && (
+        <>
+          <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} actions={actions} />
+
+          <ProtocolDrawer
+            open={logOpen}
+            entries={log}
+            onClose={() => setLogOpen(false)}
+            onClear={() => setLog([])}
+          />
+
+          {!logOpen && (
+            <button
+              onClick={() => setLogOpen(true)}
+              title="Show the live protocol: websocket frames and HTTP calls"
+              className="fixed bottom-4 right-4 z-40 flex h-8 items-center gap-2 rounded-lg border border-line bg-panel/90 px-2.5 text-11 text-ink-3 backdrop-blur transition-colors duration-150 hover:border-line-hi hover:text-ink-2"
+            >
+              <ScrollText size={13} />
+              protocol
+              <span className="tnum rounded bg-panel-hi px-1 text-[10px]">{log.length}</span>
+            </button>
+          )}
+        </>
+      )}
+    </>,
   );
 }
 

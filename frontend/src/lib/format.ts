@@ -37,3 +37,7 @@ export function dateOnly(iso: string) {
     ? "—"
     : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
+
+/** "beginner" -> "Beginner". Sentence case, not the CSS `capitalize` that
+ *  title-cases every word in a label. */
+export const title = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);

@@ -17,16 +17,26 @@ export function onAuth(cb: (session: Session | null) => void) {
   return () => data.subscription.unsubscribe();
 }
 
+/** Google is the only way in. Supabase reports a bad provider config or a
+ *  disallowed redirect in `error` rather than throwing, so surface it. */
 export async function signIn() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo: window.location.origin },
   });
-  // Supabase reports a bad provider config or a disallowed redirect here
-  // rather than throwing, so surface it instead of failing silently.
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(humanise(error.message));
 }
 
 export function signOut() {
   return supabase.auth.signOut();
+}
+
+/** The two failures a visitor can actually hit, in plain words. */
+function humanise(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("provider is not enabled"))
+    return "Google sign-in is not configured for this project yet.";
+  if (m.includes("redirect") && m.includes("not allowed"))
+    return "This address is not on the project's allowed redirect list.";
+  return message;
 }
