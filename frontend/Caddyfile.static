@@ -1,0 +1,9 @@
+:80 {
+    root * /srv
+    encode gzip
+
+    # The SPA owns its own routing, so any unknown path must still return
+    # index.html rather than a 404 from the file server.
+    try_files {path} /index.html
+    file_server
+}

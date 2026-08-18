@@ -1,0 +1,43 @@
+{$DOMAIN} {
+    encode zstd gzip
+
+    # `route` keeps these in the order written. Without it Caddy sorts handle
+    # blocks by matcher specificity, and the two deny rules below are not
+    # guaranteed to win against the broader /api/* proxy.
+    route {
+        # Every route under /internal is unauthenticated by design: it assumes
+        # a private link between the gateway and the API. Reaching it from
+        # outside means creating matches, answering for other players and
+        # finalizing ratings, so it never leaves the Docker network.
+        handle /api/internal/* {
+            respond "not found" 404
+        }
+
+        # /leaderboard/{tier}/rebuild and /snapshot are also unauthenticated
+        # but sit OUTSIDE /internal, so the rule above misses them. Every
+        # legitimate board request is a GET.
+        @board_write {
+            method POST PUT PATCH DELETE
+            path /api/leaderboard/*
+        }
+        handle @board_write {
+            respond "not found" 404
+        }
+
+        # reverse_proxy negotiates the WebSocket upgrade natively; the gateway
+        # ignores the path, so /ws is purely our routing convention.
+        handle /ws {
+            reverse_proxy gateway:8080
+        }
+
+        # handle_path strips the /api prefix before forwarding, which is why
+        # VITE_API_URL can be https://$DOMAIN/api while the API still sees /health.
+        handle_path /api/* {
+            reverse_proxy api:8000
+        }
+
+        handle {
+            reverse_proxy frontend:80
+        }
+    }
+}
