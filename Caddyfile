@@ -1,5 +1,11 @@
-{$DOMAIN} {
+{$DOMAIN}, www.{$DOMAIN} {
     encode zstd gzip
+
+    # One canonical origin. Supabase sign-in sends the visitor back to
+    # window.location.origin, so serving the app on two hostnames would
+    # need both on the redirect allowlist.
+    @www host www.{$DOMAIN}
+    redir @www https://{$DOMAIN}{uri} permanent
 
     # `route` keeps these in the order written. Without it Caddy sorts handle
     # blocks by matcher specificity, and the two deny rules below are not
