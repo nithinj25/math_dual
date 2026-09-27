@@ -103,6 +103,9 @@ function playOneDuel(token) {
   let matchedAt = 0;
   let answerSentAt = 0;
   let settled = false;
+  // Tracked so it can be cancelled: a think timer still pending when the
+  // test ends makes k6 log a warning per VU, which buries the summary.
+  let thinkTimer;
 
   const ws = new WebSocket(WS_URL);
 
@@ -110,6 +113,7 @@ function playOneDuel(token) {
     if (settled) return;
     settled = true;
     clearTimeout(watchdog);
+    clearTimeout(thinkTimer);
     duelFailed.add(failed ? 1 : 0);
     if (!failed) {
       duelsDone.add(1);
@@ -160,7 +164,7 @@ function playOneDuel(token) {
       case "question": {
         const value = answerFor(msg.prompt);
         const think = THINK_MIN_MS + Math.random() * (THINK_MAX_MS - THINK_MIN_MS);
-        setTimeout(() => {
+        thinkTimer = setTimeout(() => {
           if (settled) return;
           answerSentAt = Date.now();
           ws.send(JSON.stringify({ t: "answer", qIndex: msg.qIndex, value }));
