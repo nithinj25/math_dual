@@ -42,8 +42,13 @@ services:
       REDIS_URL: redis://redis:6379
       KAFKA_BOOTSTRAP: kafka:9092
       CORS_ORIGINS: https://${DOMAIN}
-      AUTH_MODE: real
-      ENVIRONMENT: production
+      # Default to the production values. A staging host overrides these in
+      # its .env to mint local HS256 tokens for load testing; token.py still
+      # refuses fake mode whenever ENVIRONMENT is production, so overriding
+      # one without the other fails closed.
+      AUTH_MODE: ${AUTH_MODE:-real}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      FAKE_AUTH_SECRET: ${FAKE_AUTH_SECRET:-}
       SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:?set SUPABASE_JWT_ISSUER in .env}
       SUPABASE_JWT_AUD: authenticated
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:?set SUPABASE_JWKS_URL in .env}
