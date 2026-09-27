@@ -10,6 +10,7 @@
 // (see mint-tokens.mjs) with at least as many tokens as peak VUs.
 
 import http from "k6/http";
+import { sleep } from "k6";
 import { WebSocket } from "k6/websockets";
 import { setTimeout, clearTimeout } from "k6/timers";
 import { Trend, Rate, Counter } from "k6/metrics";
@@ -29,6 +30,13 @@ const THINK_MAX_MS = Number(__ENV.THINK_MAX_MS || "4000");
 // server's 120s match limit. Plus countdown and queue wait, 180s is a
 // generous ceiling: anything slower is a real failure, not slow bots.
 const WATCHDOG_MS = Number(__ENV.WATCHDOG_MS || "180000");
+
+// Real players do not all arrive at once, and they pause before queueing
+// again. Without this every VU finishes its duel at the same instant and
+// re-queues in lockstep, so whoever is left unpaired waits a whole duel
+// for a partner -- an artifact of a small synchronised population rather
+// than anything the server did.
+const JOIN_JITTER_S = Number(__ENV.JOIN_JITTER_S || "5");
 
 const tokens = new SharedArray("tokens", () => JSON.parse(open("./tokens.json")));
 
@@ -85,6 +93,7 @@ export default function () {
     });
   }
 
+  sleep(Math.random() * JOIN_JITTER_S);
   playOneDuel(token);
 }
 
