@@ -101,7 +101,7 @@ cd math_dual && git checkout frontend-rebuild
 FAKE_SECRET=$(openssl rand -base64 24)
 cat > .env <<EOF
 DOMAIN=staging.mathduel.me
-POSTGRES_PASSWORD=$(openssl rand -base64 24)
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
 
 AUTH_MODE=fake
 ENVIRONMENT=staging
@@ -117,6 +117,10 @@ echo "FAKE_AUTH_SECRET=$FAKE_SECRET"   # you need this on loadgen
 
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+`-hex` matters for the Postgres password: it lands inside `DATABASE_URL`,
+and the `+` and `/` that base64 produces break DSN parsing. The fake auth
+secret never goes in a URL, so base64 is fine there.
 
 The Supabase values are placeholders — unused in fake mode, but Compose
 requires them to be set. `AUTH_MODE=fake` is what lets the load test mint its
