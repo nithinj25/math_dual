@@ -1,0 +1,10 @@
+# Forged auth tokens. Credentials -- never commit.
+tokens.json
+users.json
+
+# k6 output
+*.json.gz
+summary.json
+
+# solver probe data, regenerated on demand
+_probe.json
