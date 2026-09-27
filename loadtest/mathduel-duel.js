@@ -81,7 +81,18 @@ export const options = {
 let bootstrapped = false;
 
 export default function () {
-  const token = tokens[(__VU - 1) % tokens.length];
+  // Every VU needs its own player. Two VUs sharing a token are the same user:
+  // the gateway overwrites its byUser entry, room_of_player hands both the
+  // same match, and they evict each other from their own duels. The run then
+  // reports a catastrophic failure rate while the server is behaving perfectly,
+  // so fail loudly here instead of silently producing a meaningless number.
+  if (__VU > tokens.length) {
+    throw new Error(
+      `VU ${__VU} has no token: only ${tokens.length} were minted. ` +
+        `Re-run mint-tokens.mjs with N at least as large as peak VUs.`,
+    );
+  }
+  const token = tokens[__VU - 1];
 
   if (!bootstrapped) {
     bootstrapped = true;
