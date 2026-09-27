@@ -236,10 +236,85 @@ which would halve the remaining Azure credit.
 
 ## Results
 
-| Run | Change | Max VUs passing | p95 answer RTT | p99 answer RTT | CPU % | Steal % | First thing that broke |
+Run against a `Standard_B2als_v2` (2 vCPU / 4 GiB, Central India) sized
+identically to production, with k6 on a separate VM in the same region.
+Sessions are 20-question duels with 1.5-4s think time per answer.
+
+| Run | VUs | Answer RTT p95 | Answer RTT p99 | Duels failed | HTTP p95 | Match wait p95 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 0 | Baseline | | | | | | |
+| 0 smoke | 10 | 5ms | 7.8ms | 0% | 21.7ms | 61s | pass, bar match wait |
+| 1 ramp | **400** | **13ms** | 287ms | **0.07%** | 14.3ms | 6.04s | pass, bar match wait |
+| 2 ramp | 1200 | 357ms | 826ms | 82.3% | 40.5ms | 2.02s | **invalid** - harness bug |
+
+Run 1 sustained **1,387 completed duels, 28,622 answers and 92,408 WebSocket
+messages** with an answer round trip of 13ms at p95.
+
+### The ceiling was not found
+
+400 VUs passed every threshold except match wait, and answer latency had moved
+only 5ms to 13ms from idle. Run 2 was meant to find the limit and instead hit a
+bug in the load script (see below), so **the real capacity is somewhere above
+400 concurrent players and remains unmeasured.**
+
+### The match-wait failures were not the server
+
+Match wait was the only failing threshold in runs 0 and 1, and it is not a
+throughput problem.
+
+At 10 VUs the distribution was bimodal with a slow mode at exactly one duel
+length: every bot finished together and re-queued in lockstep, so whoever was
+left unpaired waited a whole duel for a partner. At 400 VUs the p95 of 6s
+corresponds to the rating window widening to about +/-150, which is the
+matchmaker deliberately trading match quality for speed after a few seconds of
+waiting - the bots had played 1,387 rated games in ten minutes and Glicko-2 had
+spread them across all three tiers.
+
+The clinching evidence is run 2: at 1200 VUs match wait *improved* to 2.02s. A
+denser queue pairs faster. Slowness was never the cause.
+
+### A prediction that was wrong
+
+Before running anything, the expectation was that matchmaking polling would
+saturate Postgres first: the gateway polls `/internal/matchmaking/join` once a
+second for every waiting player, and each poll runs a `SELECT` in
+`rating_and_tier()`.
+
+It did not come close. HTTP p95 held at 14ms through 400 VUs and 40ms through
+the invalid 1200-VU run, with a 0.2% error rate at worst. The polling design is
+wasteful and worth fixing on its own merits, but it is not the binding
+constraint at this scale.
+
+### Why run 2 is invalid
+
+The script indexed tokens with `tokens[(__VU - 1) % tokens.length]` and only 500
+tokens had been minted for 1200 VUs. VUs 501-1200 reused earlier tokens, which
+means several virtual users shared one player identity - and the gateway keeps
+one socket per user id while `room_of_player` returns the same match for both.
+They evicted each other from their own duels.
+
+The result read like a dramatic server failure (82% of duels failed, 9,526
+frames rejected) while every server-side signal stayed healthy. Duels with
+`min=3ms` gave it away. The script now refuses to start with fewer tokens than
+VUs.
+
+### Bugs this exercise found
+
+| Where | Bug |
+|---|---|
+| Deployment docs | `openssl rand -base64` for the Postgres password emits `+` and `/`, which break DSN parsing and stop the API from starting. Production had survived on luck |
+| Load script | Token index wrapped, letting VUs share a player identity |
+| Load script | Virtual players arrived in lockstep, manufacturing a match-wait figure that looked like a server problem |
+| Load script | Pending think timers were never cancelled, so k6 logged thousands of warnings and buried the summary |
+
+### Next
+
+1. Re-run the 1200-VU ramp now the token guard is in, with `docker stats`
+   captured during the 800 and 1200 stages
+2. Push past 1200 until something genuinely breaks
+3. Only then optimise, one change per run - most likely candidates being the
+   matchmaking poll, then moving duel state to Redis so the API can run more
+   than one process
 
 **Capacity** = the highest VU count at which every threshold in
-`mathduel-duel.js` still passes. Change one thing per run, or you will not
-know which change moved the number.
+`mathduel-duel.js` still passes. Change one thing per run, or you will not know
+which change moved the number.
