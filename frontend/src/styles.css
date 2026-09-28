@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   MathDuel design tokens.
+
+   One accent, three levels of ink, hairline borders. Separation comes from a
+   1px line and a small lift in surface colour — not from shadows or blur.
+   ------------------------------------------------------------------------- */
+
+@theme {
+  --color-bg: #08090a;
+  --color-panel: #0f1012;
+  --color-panel-hi: #16181b;
+  --color-line: #1c1e22;
+  --color-line-hi: #292c31;
+
+  --color-ink: #f7f8f8;
+  --color-ink-2: #8a8f98;
+  --color-ink-3: #5b5f67;
+
+  --color-accent: #6e79e8;
+  --color-accent-hi: #8d95f2;
+  --color-accent-dim: #2a2e57;
+
+  /* the two sides of a duel — used only on numerals and thin bars */
+  --color-you: #6e79e8;
+  --color-them: #e5735a;
+
+  --color-good: #4cb782;
+  --color-bad: #eb5757;
+  --color-warn: #e2b33c;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --text-11: 0.6875rem;
+  --text-13: 0.8125rem;
+  --text-15: 0.9375rem;
+
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-15);
+    line-height: 1.5;
+    letter-spacing: -0.011em;
+    font-synthesis: none;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4 {
+    margin: 0;
+    font-weight: 560;
+    letter-spacing: -0.022em;
+    color: var(--color-ink);
+  }
+
+  /* Numerals should never shift width while a score is counting. */
+  .tnum,
+  input[inputmode="numeric"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 40%, transparent);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-hi);
+    border-radius: 99px;
+    border: 3px solid var(--color-bg);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* A hairline card. No blur, no drop shadow — a line and a lift. */
+  .card {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+
+  .hairline {
+    border-top: 1px solid var(--color-line);
+  }
+
+  /* Section label: 11px, uppercase, wide tracking, tertiary ink. */
+  .eyebrow {
+    font-size: var(--text-11);
+    font-weight: 560;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+
+  /* The one piece of atmosphere: a slow, barely-there wash behind the page. */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60rem 32rem at 50% -8rem, color-mix(in oklab, var(--color-accent) 14%, transparent), transparent 70%),
+      radial-gradient(40rem 24rem at 88% 110%, color-mix(in oklab, var(--color-them) 7%, transparent), transparent 70%);
+  }
+
+  .backdrop::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.35;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+  }
+
+  /* A 1px grid that fades out — used behind the match stage only. */
+  .grid-fade {
+    background-image:
+      linear-gradient(to right, var(--color-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-line) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(28rem 18rem at 50% 45%, #000, transparent 75%);
+  }
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-6px); }
+  40%, 60% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 0.36s var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -40,6 +40,9 @@ export function startWsServer(port: number): WebSocketServer {
         try {
             const r = await mm.join(p.id, (Date.now() - startedAt) / 1000);
             if (r.matched) return await enterMatch(p, r.room, false);
+            // Remember the queue they are actually in: leaving the wrong one
+            // strands a beginner or advanced player in the sorted set.
+            p.tier = r.tier;
             p.socket.send(JSON.stringify({ t: "waiting", window: r.window }));
         } catch (err) {
             console.error("[mm]", err instanceof ApiError ? err.message : err);
@@ -105,7 +108,7 @@ export function startWsServer(port: number): WebSocketServer {
             matches.delete(p.id);
             if (p.matchId) await unsubscribe(p.matchId).catch(() => {});
             // Not in a match yet? Take them out of the queue.
-            else await mm.leave(p.id, "intermediate").catch(() => {});
+            else await mm.leave(p.id, p.tier ?? "intermediate").catch(() => {});
             console.log(`[close] ${p.name} code=${code} (${players.size} here)`);
         });
 

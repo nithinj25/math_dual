@@ -9,6 +9,7 @@ export interface Player {
     rttMs: number;
     lastPingAt: number;
     matchId?: string;
+    tier?: string;       // which queue they are sitting in, learned while polling
 }
 
 const MATCH_MS = 120_000;
