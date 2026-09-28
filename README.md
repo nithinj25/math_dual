@@ -8,6 +8,10 @@ ladder — all in about two minutes.
 
 <sub>Python · FastAPI · TypeScript · Node · React 19 · PostgreSQL · Redis · Kafka · Docker · Caddy · Azure</sub>
 
+**Load tested to 400 concurrent players** — a 13ms p95 answer round trip and a
+0.07% failure rate across 1,387 duels, on a single 2 vCPU / 4 GiB box.
+[Full results ↓](#load-testing)
+
 ---
 
 ## Contents
@@ -20,6 +24,7 @@ ladder — all in about two minutes.
 - [Deployment](#deployment)
 - [Running it locally](#running-it-locally)
 - [Testing](#testing)
+- [Load testing](#load-testing)
 - [Known limitations](#known-limitations)
 - [Project layout](#project-layout)
 
@@ -347,6 +352,60 @@ in that mode when `ENVIRONMENT=production`.
 ```bash
 cd api && pytest
 ```
+
+---
+
+## Load testing
+
+One [k6](loadtest/) virtual user is a whole player: opens a WebSocket, queues,
+is paired by the **real matchmaker**, then answers twenty generated questions
+with human think time before looping into another duel. Nothing is stubbed —
+the bots parse each prompt and solve the arithmetic themselves, because the
+server never sends an answer, and deliberately get 15% wrong so losses and
+rating drops are exercised too.
+
+Run against a staging box **sized identically to production**, with the load
+generator on a separate machine in the same region, over real HTTPS and WSS so
+TLS termination is included in every measurement.
+
+| | 10 VUs | **400 VUs** |
+|---|---|---|
+| Answer round trip p95 | 5ms | **13ms** |
+| Answer round trip p99 | 7.8ms | 287ms |
+| Duels completed | 16 | **1,387** |
+| Duels failed | 0% | **0.07%** |
+| Answers submitted | 359 | **28,622** — 45/s |
+| WebSocket messages | — | **92,408** — 147/s |
+| HTTP p95 / failures | 21.7ms / 0% | **14.3ms / 0%** |
+
+That is roughly **200 simultaneous duels** flowing through a single Python
+process that holds every live duel in its own memory.
+
+**The ceiling was not found.** Latency had barely moved from idle at 400 users,
+and the run intended to find the limit was invalidated by a bug in the load
+script rather than by the server — so real capacity is somewhere above 400 and
+remains unmeasured.
+
+Three findings worth more than the number itself:
+
+- **A prediction that was wrong.** Matchmaking polling was expected to saturate
+  Postgres first — the gateway polls once a second per waiting player, and each
+  poll re-reads a rating that has not changed. It never came close: HTTP p95
+  held at 14ms. The design is wasteful and worth fixing, but it is not the
+  binding constraint.
+- **The one failing threshold was not slowness.** Match wait failed at both
+  levels, but it was rating dispersion plus a deliberately widening search
+  window. Proven by the discarded 1200-VU run, where match wait *improved* to
+  2.02s — a denser queue pairs faster.
+- **Most of the work was proving the instrument was not lying.** Three harness
+  bugs were found and fixed, each of which produced numbers that read as a
+  server limit and were not one.
+
+It also caught a real deployment defect: generating the Postgres password with
+`openssl rand -base64` emits `+` and `/`, which break connection-string parsing
+and stop the API from booting. Production had survived it on a lucky draw.
+
+[Method, all three runs, and the scripts →](loadtest/)
 
 ---
 
